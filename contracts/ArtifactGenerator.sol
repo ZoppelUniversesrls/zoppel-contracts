@@ -16,6 +16,9 @@ import {ERC721URIStorage} from "@openzeppelin/contracts/token/ERC721/extensions/
  *      Supports enumerable and URI storage extensions. Includes role-based access control.
  */
 contract ArtifactGenerator is IERC165, ERC721Enumerable, ERC721URIStorage, AccessControl {
+
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    
     /// @dev Role identifier for minters.
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     
@@ -25,13 +28,15 @@ contract ArtifactGenerator is IERC165, ERC721Enumerable, ERC721URIStorage, Acces
     /// @dev Tracks the next token ID to be minted.
     uint256 private _nextTokenId;
 
+    uint256 public AMOUNT = 0.00001 ether; 
+
     /// @dev Base URI for token metadata.
     string private _baseTokenURI;
 
     /**
      * @dev Initializes the contract with roles and a base URI.
      * @param defaultAdmin Address to be assigned as the default admin.
-     * @param minter Address to be granted the minter role.
+     * @param minter Address to be granted the minter and admin role.
      * @param marketplace Address to be granted the marketplace role.
      * @param baseTokenURI Base URI for token metadata.
      */
@@ -40,9 +45,12 @@ contract ArtifactGenerator is IERC165, ERC721Enumerable, ERC721URIStorage, Acces
     {
         _grantRole(DEFAULT_ADMIN_ROLE, defaultAdmin);
         _grantRole(MINTER_ROLE, minter);
+        _grantRole(ADMIN_ROLE, minter);
         _grantRole(MARKETPLACE_ROLE, marketplace);
         _baseTokenURI = baseTokenURI;
     }
+
+    receive( ) external payable{}
 
     /**
      * @dev Returns the base URI for metadata.
@@ -52,13 +60,37 @@ contract ArtifactGenerator is IERC165, ERC721Enumerable, ERC721URIStorage, Acces
         return _baseTokenURI;
     }
 
-    /**
-     * @notice Mints a new token to the specified address.
-     * @dev Can only be called by an address with the MINTER_ROLE.
-     * @param to Address to receive the minted token.
-     * @param uri Metadata URI for the token.
-     * @return tokenId The ID of the minted token.
+
+
+    function concedeMinterRole(address to) external onlyRole(ADMIN_ROLE) {
+        require(!hasRole(MINTER_ROLE, to), "Already Minter");
+ 
+        /**
+        sFUEL distribution
+        **/
+        if(to.balance < 0.000005 ether){
+            require(address(this).balance >= AMOUNT, "ContractOutOfSFuel");
+            payable(to).transfer(AMOUNT);
+            
+        }
+
+        _grantRole(MINTER_ROLE, to);
+
+    }
+
+     /**
+     * @dev helper function to revoke MINTER_ROLE
      */
+    function revokeMinterRole(address to) external onlyRole(ADMIN_ROLE) {
+        require(hasRole(MINTER_ROLE, to), "Not Minter");
+        _revokeRole(MINTER_ROLE, to);
+    }
+
+
+
+     /**
+ The wallet with minter role can perform the mint. Once the mint is completed the role gets revoked if the signer is a user
+    **/
     function safeMint(address to, string memory uri)
         public
         onlyRole(MINTER_ROLE)
@@ -67,19 +99,30 @@ contract ArtifactGenerator is IERC165, ERC721Enumerable, ERC721URIStorage, Acces
         uint256 tokenId = _nextTokenId++;
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, uri);
+
+        /**
+        @dev Maintains the current functionality of the automated wallet
+        **/
+        if (!hasRole(ADMIN_ROLE,msg.sender)){
+
+        _revokeRole(MINTER_ROLE, msg.sender);
+        }
+ 
         return tokenId;
     }
 
+
+
     /**
      * @notice Mints multiple tokens to multiple recipients.
-     * @dev Can only be called by an address with the MINTER_ROLE.
+     * @dev Can only be called by an address with the ADMIN_ROLE.
      * @param recipients Array of addresses to receive minted tokens.
      * @param uris Array of metadata URIs corresponding to each token.
      * @return tokenIds Array of minted token IDs.
      */
     function batchMint(address[] memory recipients, string[] memory uris)
         public
-        onlyRole(MINTER_ROLE)
+        onlyRole(ADMIN_ROLE)
         returns (uint256[] memory)
     {
         require(recipients.length == uris.length, "Mismatched recipients and URIs");
@@ -150,6 +193,14 @@ contract ArtifactGenerator is IERC165, ERC721Enumerable, ERC721URIStorage, Acces
      */
     function setBaseURI(string memory newBaseURI) public onlyRole(DEFAULT_ADMIN_ROLE) {
         _baseTokenURI = newBaseURI;
+    }
+
+     /**
+     * @notice Allows admin to update the ETH amount to transfer in the concedeMinterRole transaction.
+     * @param newAmount The new AMOUNT.
+     */
+    function setETHAmount(uint256 newAmount) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        AMOUNT = newAmount;
     }
 
     /**
